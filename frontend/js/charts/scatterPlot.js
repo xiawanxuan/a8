@@ -1,12 +1,13 @@
 class ScatterPlot {
     constructor(containerId, options = {}) {
         this.container = document.getElementById(containerId);
-        this.margin = options.margin || { top: 20, right: 30, bottom: 50, left: 60 };
+        this.margin = options.margin || { top: 20, right: 80, bottom: 50, left: 60 };
         this.data = [];
         this.xKey = options.xKey || 'order_count';
         this.yKey = options.yKey || 'sales_amount';
         this.colorKey = options.colorKey || 'category';
         this.tooltip = null;
+        this.hoveredDot = null;
         this.init();
     }
 
@@ -64,6 +65,10 @@ class ScatterPlot {
             .domain([0, d3.max(this.data, d => +d[this.yKey]) * 1.1])
             .range([this.height, 0]).nice();
 
+        this.xScale = x;
+        this.yScale = y;
+        this.colorScale = colorScale;
+
         g.append('g')
             .attr('class', 'grid')
             .attr('transform', `translate(0,${this.height})`)
@@ -82,31 +87,37 @@ class ScatterPlot {
             .call(g => g.select('.domain').remove());
 
         const self = this;
-        g.selectAll('.dot')
+
+        const dots = g.selectAll('.dot')
             .data(this.data)
             .enter()
             .append('circle')
             .attr('class', 'dot')
             .attr('cx', d => x(+d[self.xKey]))
             .attr('cy', d => y(+d[self.yKey]))
-            .attr('r', 4)
+            .attr('r', 3.5)
             .attr('fill', d => colorScale(d[self.colorKey]))
             .attr('opacity', 0.7)
-            .style('cursor', 'pointer')
-            .on('mouseover', function(event, d) {
-                d3.select(this)
-                    .transition()
-                    .duration(200)
+            .style('cursor', 'pointer');
+
+        dots.on('mouseenter', function(event, d) {
+                self.hoveredDot = d3.select(this);
+                self.hoveredDot
                     .attr('r', 7)
-                    .attr('opacity', 1);
+                    .attr('opacity', 1)
+                    .raise();
                 self.showTooltip(event, d);
             })
-            .on('mouseout', function() {
-                d3.select(this)
-                    .transition()
-                    .duration(200)
-                    .attr('r', 4)
-                    .attr('opacity', 0.7);
+            .on('mousemove', function(event) {
+                self.moveTooltip(event);
+            })
+            .on('mouseleave', function() {
+                if (self.hoveredDot) {
+                    self.hoveredDot
+                        .attr('r', 3.5)
+                        .attr('opacity', 0.7);
+                    self.hoveredDot = null;
+                }
                 self.hideTooltip();
             });
 
@@ -122,7 +133,7 @@ class ScatterPlot {
         const categories = [...new Set(this.data.map(d => d[this.colorKey]))];
         const legend = svg.append('g')
             .attr('class', 'legend')
-            .attr('transform', `translate(${this.width + this.margin.left - 10}, ${this.margin.top})`);
+            .attr('transform', `translate(${this.width + this.margin.left + 10}, ${this.margin.top})`);
 
         const legendItems = legend.selectAll('.legend-item')
             .data(categories)
@@ -142,7 +153,7 @@ class ScatterPlot {
             .attr('x', 18)
             .attr('y', 10)
             .style('font-size', '11px')
-            .text(d => d);
+            .text(d => String(d).length > 8 ? String(d).slice(0, 8) + '...' : d);
     }
 
     showTooltip(event, d) {
@@ -153,15 +164,21 @@ class ScatterPlot {
             return val;
         };
 
-        let html = `<div><strong>${d[this.colorKey] || '数据点'}</strong></div>`;
+        let html = `<div style="font-weight:bold;margin-bottom:4px;">${d[this.colorKey] || '数据点'}</div>`;
         html += `<div>${this.xKey}: ${formatValue(+d[this.xKey])}</div>`;
         html += `<div>${this.yKey}: ${formatValue(+d[this.yKey])}</div>`;
 
         this.tooltip
             .html(html)
-            .style('left', (event.pageX + 10) + 'px')
-            .style('top', (event.pageY - 10) + 'px')
+            .style('left', (event.pageX + 12) + 'px')
+            .style('top', (event.pageY - 12) + 'px')
             .classed('visible', true);
+    }
+
+    moveTooltip(event) {
+        this.tooltip
+            .style('left', (event.pageX + 12) + 'px')
+            .style('top', (event.pageY - 12) + 'px');
     }
 
     hideTooltip() {

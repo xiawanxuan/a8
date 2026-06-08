@@ -3,8 +3,14 @@ const AppState = {
     columnInfo: null,
     summary: null,
     filters: [],
-    charts: {}
+    charts: {},
+    debounceTimer: null,
+    isUpdating: false
 };
+
+const MAX_SCATTER_POINTS = 500;
+const MAX_LINE_POINTS = 365;
+const UPDATE_DEBOUNCE_MS = 300;
 
 let lineChart, rollingChart, barChart, scatterChart, heatmapChart, corrMatrixChart, mapChart;
 
@@ -32,21 +38,41 @@ function initEventListeners() {
     document.getElementById('resetFilterBtn').addEventListener('click', resetFilters);
     document.getElementById('cleanDataBtn').addEventListener('click', cleanData);
 
-    document.getElementById('trendMetric').addEventListener('change', updateLineChart);
-    document.getElementById('trendFreq').addEventListener('change', updateLineChart);
-    document.getElementById('rollingWindow').addEventListener('change', updateRollingChart);
+    document.getElementById('trendMetric').addEventListener('change', () => debouncedUpdate(updateLineChart));
+    document.getElementById('trendFreq').addEventListener('change', () => debouncedUpdate(updateLineChart));
+    document.getElementById('rollingWindow').addEventListener('change', () => debouncedUpdate(updateRollingChart));
 
-    document.getElementById('barCategory').addEventListener('change', updateBarChart);
-    document.getElementById('barMetric').addEventListener('change', updateBarChart);
+    document.getElementById('barCategory').addEventListener('change', () => debouncedUpdate(updateBarChart));
+    document.getElementById('barMetric').addEventListener('change', () => debouncedUpdate(updateBarChart));
 
-    document.getElementById('heatX').addEventListener('change', updateHeatmap);
-    document.getElementById('heatY').addEventListener('change', updateHeatmap);
+    document.getElementById('heatX').addEventListener('change', () => debouncedUpdate(updateHeatmap));
+    document.getElementById('heatY').addEventListener('change', () => debouncedUpdate(updateHeatmap));
 
-    document.getElementById('scatterX').addEventListener('change', updateScatterChart);
-    document.getElementById('scatterY').addEventListener('change', updateScatterChart);
-    document.getElementById('scatterColor').addEventListener('change', updateScatterChart);
+    document.getElementById('scatterX').addEventListener('change', () => debouncedUpdate(updateScatterChart));
+    document.getElementById('scatterY').addEventListener('change', () => debouncedUpdate(updateScatterChart));
+    document.getElementById('scatterColor').addEventListener('change', () => debouncedUpdate(updateScatterChart));
 
-    document.getElementById('mapMetric').addEventListener('change', updateMapChart);
+    document.getElementById('mapMetric').addEventListener('change', () => debouncedUpdate(updateMapChart));
+}
+
+function debouncedUpdate(updateFn) {
+    if (AppState.debounceTimer) {
+        clearTimeout(AppState.debounceTimer);
+    }
+    AppState.debounceTimer = setTimeout(() => {
+        if (updateFn) {
+            updateFn();
+        }
+    }, UPDATE_DEBOUNCE_MS);
+}
+
+function debouncedUpdateAll() {
+    if (AppState.debounceTimer) {
+        clearTimeout(AppState.debounceTimer);
+    }
+    AppState.debounceTimer = setTimeout(() => {
+        updateAllCharts();
+    }, UPDATE_DEBOUNCE_MS);
 }
 
 function initTabs() {
@@ -211,10 +237,27 @@ function buildFilterPanel() {
     categoricalCols.forEach(col => {
         loadFilterOptions(col);
     });
+
+    bindFilterEvents();
+}
+
+function bindFilterEvents() {
+    document.querySelectorAll('.filter-select').forEach(select => {
+        select.addEventListener('change', onFilterChange);
+    });
+
+    document.querySelectorAll('.filter-date-start, .filter-date-end').forEach(input => {
+        input.addEventListener('change', onFilterChange);
+    });
+}
+
+function onFilterChange() {
+    AppState.filters = getCurrentFilters();
+    debouncedUpdateAll();
 }
 
 async function loadFilterOptions(column) {
-    const result = await API.getUniqueValues(column, 50);
+    const result = await API.getUniqueValues(column, 100);
     if (result.success && result.data) {
         const select = document.querySelector(`.filter-select[data-column="${column}"]`);
         if (select) {
@@ -322,17 +365,35 @@ function enableControls() {
 }
 
 async function updateAllCharts() {
-    await Promise.all([
-        updateLineChart(),
-        updateRollingChart(),
-        updateBarChart(),
-        updateScatterChart(),
-        updateHeatmap(),
-        updateMapChart(),
-        updateCorrelationMatrix(),
-        updateTrendInfo(),
-        updateCorrelationInfo()
-    ]);
+    if (AppState.isUpdating) return;
+    AppState.isUpdating = true;
+
+    try {
+        await Promise.all([
+            updateLineChart(),
+            updateRollingChart(),
+            updateBarChart(),
+            updateScatterChart(),
+            updateHeatmap(),
+            updateMapChart(),
+            updateCorrelationMatrix(),
+            updateTrendInfo(),
+            updateCorrelationInfo()
+        ]);
+    } finally {
+        AppState.isUpdating = false;
+    }
+}
+
+function downsampleData(data, maxPoints) {
+    if (!data || data.length <= maxPoints) return data;
+    
+    const step = Math.ceil(data.length / maxPoints);
+    const sampled = [];
+    for (let i = 0; i < data.length; i += step) {
+        sampled.push(data[i]);
+    }
+    return sampled;
 }
 
 async function updateLineChart() {
@@ -343,7 +404,8 @@ async function updateLineChart() {
 
     const result = await API.getLineChartData('date', metric, freq, 'sum', AppState.filters);
     if (result.success && result.data) {
-        lineChart.setData(result.data, 'date', metric);
+        const sampledData = downsampleData(result.data, MAX_LINE_POINTS);
+        lineChart.setData(sampledData, 'date', metric);
     }
 }
 
@@ -351,11 +413,13 @@ async function updateRollingChart() {
     if (!AppState.dataLoaded) return;
 
     const metric = document.getElementById('trendMetric').value;
-    const window = parseInt(document.getElementById('rollingWindow').value);
+    const windowSize = parseInt(document.getElementById('rollingWindow').value);
 
-    const result = await API.getRollingAverage('date', metric, window, AppState.filters);
+    const result = await API.getRollingAverage('date', metric, windowSize, AppState.filters);
     if (result.success && result.data) {
-        rollingChart.setData(result.data, 'date', 'rolling_avg');
+        const cleanData = result.data.filter(d => d.rolling_avg !== null && d.rolling_avg !== undefined && !isNaN(d.rolling_avg));
+        const sampledData = downsampleData(cleanData, MAX_LINE_POINTS);
+        rollingChart.setData(sampledData, 'date', 'rolling_avg');
     }
 }
 
@@ -365,7 +429,7 @@ async function updateBarChart() {
     const category = document.getElementById('barCategory').value;
     const metric = document.getElementById('barMetric').value;
 
-    const result = await API.getBarChartData(category, metric, 'sum', AppState.filters, 15);
+    const result = await API.getBarChartData(category, metric, 'sum', AppState.filters, 20);
     if (result.success && result.data) {
         barChart.setData(result.data, category, 'value');
     }
@@ -380,9 +444,7 @@ async function updateScatterChart() {
 
     const result = await API.getScatterChartData(xCol, yCol, colorCol, AppState.filters);
     if (result.success && result.data) {
-        const sampledData = result.data.length > 500
-            ? result.data.filter((_, i) => i % Math.ceil(result.data.length / 500) === 0)
-            : result.data;
+        const sampledData = downsampleData(result.data, MAX_SCATTER_POINTS);
         scatterChart.setData(sampledData, xCol, yCol, colorCol);
     }
 }
@@ -420,7 +482,7 @@ async function updateMapChart() {
     const result = await API.getSpatialDistribution('city', metric, AppState.filters);
 
     if (result.success && result.data && AppState.columnInfo) {
-        const cityLatLon = await getCityLatLon();
+        const cityLatLon = getCityLatLon();
         const mapData = result.data.map(item => {
             const cityInfo = cityLatLon[item.city] || {};
             return {
@@ -434,13 +496,12 @@ async function updateMapChart() {
         });
 
         mapChart.setData(mapData, { valueKey: 'total', labelKey: 'city' });
-
         updateSpatialRank(result.data);
     }
 }
 
 function getCityLatLon() {
-    const cities = {
+    return {
         '北京': { latitude: 39.9042, longitude: 116.4074 },
         '上海': { latitude: 31.2304, longitude: 121.4737 },
         '广州': { latitude: 23.1291, longitude: 113.2644 },
@@ -457,7 +518,6 @@ function getCityLatLon() {
         '长沙': { latitude: 28.2282, longitude: 112.9388 },
         '青岛': { latitude: 36.0671, longitude: 120.3826 }
     };
-    return Promise.resolve(cities);
 }
 
 function updateSpatialRank(data) {

@@ -7,6 +7,7 @@ class LineChart {
         this.xKey = options.xKey || 'date';
         this.yKey = options.yKey || 'sales_amount';
         this.tooltip = null;
+        this.showDotsThreshold = 50;
         this.init();
     }
 
@@ -63,6 +64,10 @@ class LineChart {
             .domain([0, d3.max(yValues) * 1.1])
             .range([this.height, 0]).nice();
 
+        this.xScale = x;
+        this.yScale = y;
+        this.xValues = xValues;
+
         g.append('g')
             .attr('class', 'grid')
             .attr('transform', `translate(0,${this.height})`)
@@ -91,9 +96,10 @@ class LineChart {
             .y1(d => y(+d[this.yKey]))
             .curve(d3.curveMonotoneX);
 
+        const gradientId = 'lineGradient_' + Math.random().toString(36).substr(2, 9);
         const gradient = svg.append('defs')
             .append('linearGradient')
-            .attr('id', 'lineGradient')
+            .attr('id', gradientId)
             .attr('x1', '0%')
             .attr('y1', '0%')
             .attr('x2', '0%')
@@ -112,7 +118,7 @@ class LineChart {
         g.append('path')
             .datum(this.data)
             .attr('class', 'area')
-            .attr('fill', 'url(#lineGradient)')
+            .attr('fill', `url(#${gradientId})`)
             .attr('d', area);
 
         g.append('path')
@@ -124,25 +130,76 @@ class LineChart {
             .attr('d', line);
 
         const self = this;
-        g.selectAll('.dot')
-            .data(this.data)
-            .enter()
-            .append('circle')
-            .attr('class', 'dot')
-            .attr('cx', (d, i) => x(xValues[i]))
-            .attr('cy', d => y(+d[this.yKey]))
-            .attr('r', 3)
-            .attr('fill', 'white')
-            .attr('stroke', this.color)
-            .attr('stroke-width', 2)
-            .on('mouseover', function(event, d) {
-                d3.select(this).attr('r', 6);
-                self.showTooltip(event, d);
-            })
-            .on('mouseout', function() {
-                d3.select(this).attr('r', 3);
-                self.hideTooltip();
-            });
+        const showDots = this.data.length <= this.showDotsThreshold;
+
+        if (showDots) {
+            g.selectAll('.dot')
+                .data(this.data)
+                .enter()
+                .append('circle')
+                .attr('class', 'dot')
+                .attr('cx', (d, i) => x(xValues[i]))
+                .attr('cy', d => y(+d[this.yKey]))
+                .attr('r', 3)
+                .attr('fill', 'white')
+                .attr('stroke', this.color)
+                .attr('stroke-width', 2)
+                .style('cursor', 'pointer')
+                .on('mouseover', function(event, d) {
+                    d3.select(this).attr('r', 6);
+                    self.showTooltip(event, d);
+                })
+                .on('mousemove', function(event, d) {
+                    self.moveTooltip(event);
+                })
+                .on('mouseout', function() {
+                    d3.select(this).attr('r', 3);
+                    self.hideTooltip();
+                });
+        } else {
+            const bisect = d3.bisector((d, i) => xValues[i]).left;
+
+            const focus = g.append('g')
+                .style('display', 'none');
+
+            focus.append('circle')
+                .attr('r', 5)
+                .attr('fill', 'white')
+                .attr('stroke', this.color)
+                .attr('stroke-width', 2);
+
+            const overlay = g.append('rect')
+                .attr('class', 'overlay')
+                .attr('width', this.width)
+                .attr('height', this.height)
+                .style('fill', 'none')
+                .style('pointer-events', 'all')
+                .style('cursor', 'crosshair')
+                .on('mouseover', function() { focus.style('display', null); })
+                .on('mouseout', function() { 
+                    focus.style('display', 'none'); 
+                    self.hideTooltip();
+                })
+                .on('mousemove', function(event) {
+                    const [mx] = d3.pointer(event);
+                    const x0 = x.invert(mx);
+                    const i = bisect(xValues, x0, 1);
+                    const d0 = self.data[i - 1];
+                    const d1 = self.data[i];
+                    if (!d0 && !d1) return;
+                    
+                    let d, idx;
+                    if (!d0) { d = d1; idx = i; }
+                    else if (!d1) { d = d0; idx = i - 1; }
+                    else {
+                        d = x0 - xValues[i - 1] > xValues[i] - x0 ? d1 : d0;
+                        idx = x0 - xValues[i - 1] > xValues[i] - x0 ? i : i - 1;
+                    }
+                    
+                    focus.attr('transform', `translate(${x(xValues[idx])},${y(+d[self.yKey])})`);
+                    self.showTooltip(event, d);
+                });
+        }
 
         g.append('g')
             .attr('class', 'x axis')
@@ -178,6 +235,12 @@ class LineChart {
             .style('left', (event.pageX + 10) + 'px')
             .style('top', (event.pageY - 10) + 'px')
             .classed('visible', true);
+    }
+
+    moveTooltip(event) {
+        this.tooltip
+            .style('left', (event.pageX + 10) + 'px')
+            .style('top', (event.pageY - 10) + 'px');
     }
 
     hideTooltip() {
