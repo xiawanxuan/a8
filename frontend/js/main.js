@@ -1,0 +1,573 @@
+const AppState = {
+    dataLoaded: false,
+    columnInfo: null,
+    summary: null,
+    filters: [],
+    charts: {}
+};
+
+let lineChart, rollingChart, barChart, scatterChart, heatmapChart, corrMatrixChart, mapChart;
+
+document.addEventListener('DOMContentLoaded', function() {
+    initCharts();
+    initEventListeners();
+    initTabs();
+});
+
+function initCharts() {
+    lineChart = new LineChart('lineChart', { color: '#667eea' });
+    rollingChart = new LineChart('rollingChart', { color: '#52c41a' });
+    barChart = new BarChart('barChart');
+    scatterChart = new ScatterPlot('scatterChart');
+    heatmapChart = new HeatMap('heatmapChart');
+    mapChart = new MapChart('mapChart');
+    corrMatrixChart = new HeatMap('corrMatrix');
+}
+
+function initEventListeners() {
+    document.getElementById('loadSampleBtn').addEventListener('click', loadSampleData);
+    document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
+
+    document.getElementById('applyFilterBtn').addEventListener('click', applyFilters);
+    document.getElementById('resetFilterBtn').addEventListener('click', resetFilters);
+    document.getElementById('cleanDataBtn').addEventListener('click', cleanData);
+
+    document.getElementById('trendMetric').addEventListener('change', updateLineChart);
+    document.getElementById('trendFreq').addEventListener('change', updateLineChart);
+    document.getElementById('rollingWindow').addEventListener('change', updateRollingChart);
+
+    document.getElementById('barCategory').addEventListener('change', updateBarChart);
+    document.getElementById('barMetric').addEventListener('change', updateBarChart);
+
+    document.getElementById('heatX').addEventListener('change', updateHeatmap);
+    document.getElementById('heatY').addEventListener('change', updateHeatmap);
+
+    document.getElementById('scatterX').addEventListener('change', updateScatterChart);
+    document.getElementById('scatterY').addEventListener('change', updateScatterChart);
+    document.getElementById('scatterColor').addEventListener('change', updateScatterChart);
+
+    document.getElementById('mapMetric').addEventListener('change', updateMapChart);
+}
+
+function initTabs() {
+    const tabs = document.querySelectorAll('.chart-tab');
+    tabs.forEach(tab => {
+        tab.addEventListener('click', function() {
+            const tabName = this.dataset.tab;
+            switchTab(tabName);
+        });
+    });
+}
+
+function switchTab(tabName) {
+    document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+    document.querySelector(`.chart-tab[data-tab="${tabName}"]`).classList.add('active');
+    document.getElementById(`${tabName}Tab`).classList.add('active');
+
+    setTimeout(() => {
+        if (tabName === 'trend') {
+            lineChart.resize();
+            rollingChart.resize();
+        } else if (tabName === 'comparison') {
+            barChart.resize();
+            heatmapChart.resize();
+        } else if (tabName === 'correlation') {
+            scatterChart.resize();
+            corrMatrixChart.resize();
+        } else if (tabName === 'spatial') {
+            mapChart.resize();
+        }
+    }, 50);
+}
+
+async function loadSampleData() {
+    showLoading();
+    try {
+        const result = await API.loadSampleData();
+        if (result.success) {
+            AppState.dataLoaded = true;
+            AppState.columnInfo = result.column_info;
+            AppState.summary = result.summary;
+            AppState.filters = [];
+
+            updateDataSummary();
+            buildFilterPanel();
+            enableControls();
+            updateAllCharts();
+
+            showToast('示例数据加载成功！', 'success');
+        } else {
+            showToast(result.message || '加载失败', 'error');
+        }
+    } catch (error) {
+        showToast('加载失败: ' + error.message, 'error');
+    }
+    hideLoading();
+}
+
+async function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    showLoading();
+    try {
+        const result = await API.uploadFile(file);
+        if (result.success) {
+            AppState.dataLoaded = true;
+            AppState.columnInfo = result.column_info;
+            AppState.summary = result.summary;
+            AppState.filters = [];
+
+            updateDataSummary();
+            buildFilterPanel();
+            enableControls();
+            updateAllCharts();
+
+            showToast('数据上传成功！', 'success');
+        } else {
+            showToast(result.message || '上传失败', 'error');
+        }
+    } catch (error) {
+        showToast('上传失败: ' + error.message, 'error');
+    }
+    hideLoading();
+    event.target.value = '';
+}
+
+function updateDataSummary() {
+    const summary = AppState.summary;
+    const columnInfo = AppState.columnInfo;
+
+    if (!summary) return;
+
+    const html = `
+        <div class="summary-item">
+            <span class="summary-label">数据行数</span>
+            <span class="summary-value">${summary.rows.toLocaleString()}</span>
+        </div>
+        <div class="summary-item">
+            <span class="summary-label">数据列数</span>
+            <span class="summary-value">${summary.columns}</span>
+        </div>
+        <div class="summary-item">
+            <span class="summary-label">时间列</span>
+            <span class="summary-value">${columnInfo.date_columns.length}</span>
+        </div>
+        <div class="summary-item">
+            <span class="summary-label">数值列</span>
+            <span class="summary-value">${columnInfo.numeric_columns.length}</span>
+        </div>
+        <div class="summary-item">
+            <span class="summary-label">分类列</span>
+            <span class="summary-value">${columnInfo.categorical_columns.length}</span>
+        </div>
+        <div class="summary-item">
+            <span class="summary-label">空间列</span>
+            <span class="summary-value">${columnInfo.spatial_columns.length}</span>
+        </div>
+    `;
+
+    document.getElementById('dataSummary').innerHTML = html;
+}
+
+function buildFilterPanel() {
+    const panel = document.getElementById('filterPanel');
+    const columnInfo = AppState.columnInfo;
+
+    if (!columnInfo) return;
+
+    let html = '';
+
+    const categoricalCols = columnInfo.categorical_columns.slice(0, 6);
+    categoricalCols.forEach(col => {
+        html += `
+            <div class="filter-group">
+                <label>${col}</label>
+                <select class="filter-select" data-column="${col}" data-type="categorical">
+                    <option value="">全部</option>
+                </select>
+            </div>
+        `;
+    });
+
+    const dateCols = columnInfo.date_columns.slice(0, 2);
+    dateCols.forEach(col => {
+        html += `
+            <div class="filter-group">
+                <label>${col} (起)</label>
+                <input type="date" class="filter-date-start" data-column="${col}" data-type="date_start">
+            </div>
+            <div class="filter-group">
+                <label>${col} (止)</label>
+                <input type="date" class="filter-date-end" data-column="${col}" data-type="date_end">
+            </div>
+        `;
+    });
+
+    panel.innerHTML = html;
+
+    categoricalCols.forEach(col => {
+        loadFilterOptions(col);
+    });
+}
+
+async function loadFilterOptions(column) {
+    const result = await API.getUniqueValues(column, 50);
+    if (result.success && result.data) {
+        const select = document.querySelector(`.filter-select[data-column="${column}"]`);
+        if (select) {
+            result.data.forEach(val => {
+                const option = document.createElement('option');
+                option.value = val;
+                option.textContent = val;
+                select.appendChild(option);
+            });
+        }
+    }
+}
+
+function getCurrentFilters() {
+    const filters = [];
+
+    document.querySelectorAll('.filter-select').forEach(select => {
+        const column = select.dataset.column;
+        const value = select.value;
+        if (value) {
+            filters.push({ column, operator: 'equals', value });
+        }
+    });
+
+    const dateColumns = {};
+    document.querySelectorAll('.filter-date-start, .filter-date-end').forEach(input => {
+        const column = input.dataset.column;
+        const type = input.dataset.type;
+        const value = input.value;
+        if (value) {
+            if (!dateColumns[column]) dateColumns[column] = {};
+            dateColumns[column][type] = value;
+        }
+    });
+
+    Object.entries(dateColumns).forEach(([column, dates]) => {
+        if (dates.date_start && dates.date_end) {
+            filters.push({
+                column,
+                operator: 'date_between',
+                value: [dates.date_start, dates.date_end]
+            });
+        } else if (dates.date_start) {
+            filters.push({ column, operator: 'greater_equal', value: dates.date_start });
+        } else if (dates.date_end) {
+            filters.push({ column, operator: 'less_equal', value: dates.date_end });
+        }
+    });
+
+    return filters;
+}
+
+async function applyFilters() {
+    AppState.filters = getCurrentFilters();
+    await updateAllCharts();
+    showToast('筛选已应用', 'success');
+}
+
+function resetFilters() {
+    document.querySelectorAll('.filter-select').forEach(select => {
+        select.value = '';
+    });
+    document.querySelectorAll('.filter-date-start, .filter-date-end').forEach(input => {
+        input.value = '';
+    });
+    AppState.filters = [];
+    updateAllCharts();
+    showToast('筛选已重置', 'success');
+}
+
+async function cleanData() {
+    showLoading();
+    try {
+        const options = {
+            remove_duplicates: document.getElementById('cleanDedup').checked,
+            handle_missing: document.getElementById('cleanMissing').value,
+            convert_dates: document.getElementById('cleanDates').checked,
+            standardize_text: false
+        };
+
+        const result = await API.cleanData(options);
+        if (result.success) {
+            AppState.summary = result.summary;
+            updateDataSummary();
+            await updateAllCharts();
+
+            let message = '数据清洗完成！';
+            if (result.report.duplicates_removed) {
+                message += ` 去除重复: ${result.report.duplicates_removed}条`;
+            }
+            showToast(message, 'success');
+        } else {
+            showToast(result.message || '清洗失败', 'error');
+        }
+    } catch (error) {
+        showToast('清洗失败: ' + error.message, 'error');
+    }
+    hideLoading();
+}
+
+function enableControls() {
+    document.getElementById('applyFilterBtn').disabled = false;
+    document.getElementById('resetFilterBtn').disabled = false;
+    document.getElementById('cleanDataBtn').disabled = false;
+}
+
+async function updateAllCharts() {
+    await Promise.all([
+        updateLineChart(),
+        updateRollingChart(),
+        updateBarChart(),
+        updateScatterChart(),
+        updateHeatmap(),
+        updateMapChart(),
+        updateCorrelationMatrix(),
+        updateTrendInfo(),
+        updateCorrelationInfo()
+    ]);
+}
+
+async function updateLineChart() {
+    if (!AppState.dataLoaded) return;
+
+    const metric = document.getElementById('trendMetric').value;
+    const freq = document.getElementById('trendFreq').value;
+
+    const result = await API.getLineChartData('date', metric, freq, 'sum', AppState.filters);
+    if (result.success && result.data) {
+        lineChart.setData(result.data, 'date', metric);
+    }
+}
+
+async function updateRollingChart() {
+    if (!AppState.dataLoaded) return;
+
+    const metric = document.getElementById('trendMetric').value;
+    const window = parseInt(document.getElementById('rollingWindow').value);
+
+    const result = await API.getRollingAverage('date', metric, window, AppState.filters);
+    if (result.success && result.data) {
+        rollingChart.setData(result.data, 'date', 'rolling_avg');
+    }
+}
+
+async function updateBarChart() {
+    if (!AppState.dataLoaded) return;
+
+    const category = document.getElementById('barCategory').value;
+    const metric = document.getElementById('barMetric').value;
+
+    const result = await API.getBarChartData(category, metric, 'sum', AppState.filters, 15);
+    if (result.success && result.data) {
+        barChart.setData(result.data, category, 'value');
+    }
+}
+
+async function updateScatterChart() {
+    if (!AppState.dataLoaded) return;
+
+    const xCol = document.getElementById('scatterX').value;
+    const yCol = document.getElementById('scatterY').value;
+    const colorCol = document.getElementById('scatterColor').value;
+
+    const result = await API.getScatterChartData(xCol, yCol, colorCol, AppState.filters);
+    if (result.success && result.data) {
+        const sampledData = result.data.length > 500
+            ? result.data.filter((_, i) => i % Math.ceil(result.data.length / 500) === 0)
+            : result.data;
+        scatterChart.setData(sampledData, xCol, yCol, colorCol);
+    }
+}
+
+async function updateHeatmap() {
+    if (!AppState.dataLoaded) return;
+
+    const xCol = document.getElementById('heatX').value;
+    const yCol = document.getElementById('heatY').value;
+
+    if (xCol === yCol) {
+        showToast('X轴和Y轴不能相同', 'warning');
+        return;
+    }
+
+    const result = await API.getHeatmapData(xCol, yCol, 'sales_amount', 'sum', AppState.filters);
+    if (result.success && result.data) {
+        heatmapChart.setData(result.data);
+    }
+}
+
+async function updateCorrelationMatrix() {
+    if (!AppState.dataLoaded) return;
+
+    const result = await API.getCorrelationMatrix(null, 'pearson', AppState.filters);
+    if (result.success && result.data) {
+        corrMatrixChart.setData(result.data);
+    }
+}
+
+async function updateMapChart() {
+    if (!AppState.dataLoaded) return;
+
+    const metric = document.getElementById('mapMetric').value;
+    const result = await API.getSpatialDistribution('city', metric, AppState.filters);
+
+    if (result.success && result.data && AppState.columnInfo) {
+        const cityLatLon = await getCityLatLon();
+        const mapData = result.data.map(item => {
+            const cityInfo = cityLatLon[item.city] || {};
+            return {
+                city: item.city,
+                latitude: cityInfo.latitude || 30,
+                longitude: cityInfo.longitude || 110,
+                total: item.total,
+                average: item.average,
+                count: item.count
+            };
+        });
+
+        mapChart.setData(mapData, { valueKey: 'total', labelKey: 'city' });
+
+        updateSpatialRank(result.data);
+    }
+}
+
+function getCityLatLon() {
+    const cities = {
+        '北京': { latitude: 39.9042, longitude: 116.4074 },
+        '上海': { latitude: 31.2304, longitude: 121.4737 },
+        '广州': { latitude: 23.1291, longitude: 113.2644 },
+        '深圳': { latitude: 22.5431, longitude: 114.0579 },
+        '成都': { latitude: 30.5728, longitude: 104.0668 },
+        '杭州': { latitude: 30.2741, longitude: 120.1551 },
+        '武汉': { latitude: 30.5928, longitude: 114.3055 },
+        '西安': { latitude: 34.3416, longitude: 108.9398 },
+        '南京': { latitude: 32.0603, longitude: 118.7969 },
+        '重庆': { latitude: 29.4316, longitude: 106.9123 },
+        '天津': { latitude: 39.3434, longitude: 117.3616 },
+        '苏州': { latitude: 31.2989, longitude: 120.5853 },
+        '郑州': { latitude: 34.7466, longitude: 113.6254 },
+        '长沙': { latitude: 28.2282, longitude: 112.9388 },
+        '青岛': { latitude: 36.0671, longitude: 120.3826 }
+    };
+    return Promise.resolve(cities);
+}
+
+function updateSpatialRank(data) {
+    const container = document.getElementById('spatialRank');
+    if (!container || !data) return;
+
+    const sorted = [...data].sort((a, b) => b.total - a.total);
+
+    let html = '<div style="padding: 8px 0;">';
+    sorted.forEach((item, index) => {
+        const rankColor = index < 3 ? ['#f5222d', '#fa8c16', '#faad14'][index] : '#666';
+        const barWidth = (item.total / sorted[0].total) * 100;
+        html += `
+            <div style="display:flex;align-items:center;margin-bottom:10px;">
+                <span style="width:24px;color:${rankColor};font-weight:bold;">${index + 1}</span>
+                <span style="width:60px;font-size:12px;">${item.city}</span>
+                <div style="flex:1;height:20px;background:#f0f0f0;border-radius:4px;overflow:hidden;margin:0 8px;">
+                    <div style="height:100%;background:linear-gradient(90deg,#667eea,#764ba2);width:${barWidth}%;"></div>
+                </div>
+                <span style="width:80px;text-align:right;font-size:12px;font-weight:500;">${formatNumber(item.total)}</span>
+            </div>
+        `;
+    });
+    html += '</div>';
+
+    container.innerHTML = html;
+}
+
+async function updateTrendInfo() {
+    if (!AppState.dataLoaded) return;
+
+    const metric = document.getElementById('trendMetric').value;
+    const result = await API.getTrendAnalysis('date', metric, AppState.filters);
+
+    if (result.success && result.data) {
+        const trend = result.data;
+        const html = `
+            <div class="info-grid">
+                <div class="info-item">
+                    <div class="label">趋势方向</div>
+                    <div class="value ${trend.direction === 'increasing' ? 'positive' : trend.direction === 'decreasing' ? 'negative' : ''}">
+                        ${trend.direction === 'increasing' ? '📈 上升' : trend.direction === 'decreasing' ? '📉 下降' : '➡️ 平稳'}
+                    </div>
+                </div>
+                <div class="info-item">
+                    <div class="label">R² 拟合度</div>
+                    <div class="value">${(trend.r_squared * 100).toFixed(1)}%</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">显著性</div>
+                    <div class="value">${trend.significance === 'high' ? '高度显著' : trend.significance === 'medium' ? '中度显著' : '不显著'}</div>
+                </div>
+                <div class="info-item">
+                    <div class="label">P值</div>
+                    <div class="value">${trend.p_value.toExponential(2)}</div>
+                </div>
+            </div>
+        `;
+        document.getElementById('trendInfo').innerHTML = html;
+    }
+}
+
+async function updateCorrelationInfo() {
+    if (!AppState.dataLoaded) return;
+
+    const result = await API.getTopCorrelations('sales_amount', 5, 'pearson', AppState.filters);
+
+    if (result.success && result.data) {
+        let html = '<p style="margin-bottom:8px;font-weight:500;">与销售额最相关的指标：</p>';
+        html += '<ul class="correlation-list">';
+        result.data.forEach(item => {
+            const isPositive = item.correlation > 0;
+            html += `
+                <li class="correlation-item">
+                    <span class="correlation-name">${item.column}</span>
+                    <span class="correlation-value ${isPositive ? 'positive' : 'negative'}">
+                        ${isPositive ? '+' : ''}${(item.correlation * 100).toFixed(1)}%
+                    </span>
+                </li>
+            `;
+        });
+        html += '</ul>';
+        document.getElementById('correlationInfo').innerHTML = html;
+    }
+}
+
+function formatNumber(num) {
+    if (num >= 100000000) return (num / 100000000).toFixed(2) + '亿';
+    if (num >= 10000) return (num / 10000).toFixed(2) + '万';
+    if (num >= 1000) return (num / 1000).toFixed(2) + 'k';
+    return num.toFixed(0);
+}
+
+function showLoading() {
+    document.getElementById('loadingOverlay').classList.remove('hidden');
+}
+
+function hideLoading() {
+    document.getElementById('loadingOverlay').classList.add('hidden');
+}
+
+let toastTimer;
+function showToast(message, type = 'success') {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = 'toast';
+    if (type) toast.classList.add(type);
+
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+        toast.classList.add('hidden');
+    }, 3000);
+}

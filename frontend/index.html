@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多维度时空数据分析可视化系统</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <header class="header">
+        <div class="header-left">
+            <h1>📊 时空数据分析平台</h1>
+            <span class="subtitle">Spatiotemporal Data Analysis Platform</span>
+        </div>
+        <div class="header-right">
+            <button id="loadSampleBtn" class="btn btn-secondary">加载示例数据</button>
+            <label class="btn btn-primary">
+                <input type="file" id="fileUpload" accept=".csv,.json" style="display: none;">
+                📁 上传数据
+            </label>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <h3>📈 数据概览</h3>
+                <div id="dataSummary" class="data-summary">
+                    <p class="placeholder">请先加载数据</p>
+                </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>🔍 筛选条件</h3>
+                <div id="filterPanel" class="filter-panel">
+                    <p class="placeholder">加载数据后可设置筛选条件</p>
+                </div>
+                <button id="applyFilterBtn" class="btn btn-primary btn-block" disabled>应用筛选</button>
+                <button id="resetFilterBtn" class="btn btn-secondary btn-block" disabled>重置筛选</button>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>🧹 数据清洗</h3>
+                <div class="clean-options">
+                    <label><input type="checkbox" id="cleanDedup" checked> 去除重复</label>
+                    <label>
+                        缺失值处理:
+                        <select id="cleanMissing">
+                            <option value="drop">删除行</option>
+                            <option value="mean">均值填充</option>
+                            <option value="median">中位数填充</option>
+                            <option value="ffill">前向填充</option>
+                        </select>
+                    </label>
+                    <label><input type="checkbox" id="cleanDates" checked> 自动转换日期</label>
+                </div>
+                <button id="cleanDataBtn" class="btn btn-warning btn-block" disabled>执行清洗</button>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>📊 图表类型</h3>
+                <div class="chart-tabs">
+                    <button class="chart-tab active" data-tab="trend">趋势分析</button>
+                    <button class="chart-tab" data-tab="comparison">对比分析</button>
+                    <button class="chart-tab" data-tab="correlation">关联分析</button>
+                    <button class="chart-tab" data-tab="spatial">空间分析</button>
+                </div>
+            </div>
+        </aside>
+
+        <main class="content">
+            <div id="trendTab" class="tab-content active">
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h4>销售趋势折线图</h4>
+                            <div class="chart-controls">
+                                <select id="trendMetric">
+                                    <option value="sales_amount">销售额</option>
+                                    <option value="order_count">订单量</option>
+                                    <option value="customer_count">客户数</option>
+                                </select>
+                                <select id="trendFreq">
+                                    <option value="D">按日</option>
+                                    <option value="W">按周</option>
+                                    <option value="M" selected>按月</option>
+                                    <option value="Q">按季度</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="lineChart" class="chart-container"></div>
+                    </div>
+                </div>
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h4>移动平均分析</h4>
+                            <div class="chart-controls">
+                                <select id="rollingWindow">
+                                    <option value="7">7天</option>
+                                    <option value="14">14天</option>
+                                    <option value="30" selected>30天</option>
+                                    <option value="60">60天</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="rollingChart" class="chart-container"></div>
+                    </div>
+                </div>
+                <div class="chart-row">
+                    <div class="chart-card info-card">
+                        <div class="chart-header">
+                            <h4>📈 趋势分析结果</h4>
+                        </div>
+                        <div id="trendInfo" class="info-content">
+                            <p class="placeholder">加载数据后显示趋势分析结果</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="comparisonTab" class="tab-content">
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h4>城市销售柱状图</h4>
+                            <div class="chart-controls">
+                                <select id="barCategory">
+                                    <option value="city">城市</option>
+                                    <option value="category">产品类别</option>
+                                    <option value="region">区域</option>
+                                    <option value="province">省份</option>
+                                </select>
+                                <select id="barMetric">
+                                    <option value="sales_amount">销售额</option>
+                                    <option value="order_count">订单量</option>
+                                    <option value="customer_count">客户数</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="barChart" class="chart-container"></div>
+                    </div>
+                </div>
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h4>销售额热力图</h4>
+                            <div class="chart-controls">
+                                <select id="heatX">
+                                    <option value="month">月份</option>
+                                    <option value="city">城市</option>
+                                    <option value="category">类别</option>
+                                </select>
+                                <span>×</span>
+                                <select id="heatY">
+                                    <option value="city">城市</option>
+                                    <option value="category">类别</option>
+                                    <option value="region">区域</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="heatmapChart" class="chart-container"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="correlationTab" class="tab-content">
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h4>散点图 - 销售额 vs 订单量</h4>
+                            <div class="chart-controls">
+                                <select id="scatterX">
+                                    <option value="order_count">订单量</option>
+                                    <option value="customer_count">客户数</option>
+                                    <option value="avg_order_value">客单价</option>
+                                </select>
+                                <select id="scatterY">
+                                    <option value="sales_amount">销售额</option>
+                                    <option value="order_count">订单量</option>
+                                    <option value="customer_count">客户数</option>
+                                </select>
+                                <select id="scatterColor">
+                                    <option value="category">按类别着色</option>
+                                    <option value="city">按城市着色</option>
+                                    <option value="region">按区域着色</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="scatterChart" class="chart-container"></div>
+                    </div>
+                </div>
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h4>相关性矩阵热力图</h4>
+                        </div>
+                        <div id="corrMatrix" class="chart-container"></div>
+                    </div>
+                </div>
+                <div class="chart-row">
+                    <div class="chart-card info-card">
+                        <div class="chart-header">
+                            <h4>🔗 相关性分析</h4>
+                        </div>
+                        <div id="correlationInfo" class="info-content">
+                            <p class="placeholder">加载数据后显示相关性分析结果</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="spatialTab" class="tab-content">
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h4>城市销售地图分布</h4>
+                            <div class="chart-controls">
+                                <select id="mapMetric">
+                                    <option value="sales_amount">销售额</option>
+                                    <option value="order_count">订单量</option>
+                                    <option value="customer_count">客户数</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="mapChart" class="chart-container"></div>
+                    </div>
+                </div>
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h4>区域销售排名</h4>
+                        </div>
+                        <div id="spatialRank" class="chart-container"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="loadingOverlay" class="loading-overlay hidden">
+        <div class="loading-spinner"></div>
+        <p>加载中...</p>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="js/utils/api.js"></script>
+    <script src="js/charts/lineChart.js"></script>
+    <script src="js/charts/barChart.js"></script>
+    <script src="js/charts/scatterPlot.js"></script>
+    <script src="js/charts/heatmap.js"></script>
+    <script src="js/charts/mapChart.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
