@@ -219,4 +219,46 @@ const API = {
             }),
         });
     },
+
+    getForecast(timeColumn, valueColumn, method = 'linear', periods = 30, window = 7, alpha = 0.3, freq = 'D', filters = []) {
+        return this.request('/analysis/forecast', {
+            method: 'POST',
+            body: JSON.stringify({
+                time_column: timeColumn,
+                value_column: valueColumn,
+                method,
+                periods,
+                window,
+                alpha,
+                freq,
+                filters,
+            }),
+        });
+    },
+
+    getAnomalyDetection(valueColumn, method = 'z_score', timeColumn = null, threshold = 3, k = 1.5, window = 7, filters = []) {
+        return this.request('/analysis/anomaly', {
+            method: 'POST',
+            body: JSON.stringify({
+                value_column: valueColumn,
+                time_column: timeColumn,
+                method,
+                threshold,
+                k,
+                window,
+                filters,
+            }),
+        });
+    },
+
+    getAnomalySummary(valueColumn, timeColumn = null, filters = []) {
+        return this.request('/analysis/anomaly-summary', {
+            method: 'POST',
+            body: JSON.stringify({
+                value_column: valueColumn,
+                time_column: timeColumn,
+                filters,
+            }),
+        });
+    },
 };

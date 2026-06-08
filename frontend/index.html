@@ -65,7 +65,13 @@
                     <button class="chart-tab" data-tab="comparison">对比分析</button>
                     <button class="chart-tab" data-tab="correlation">关联分析</button>
                     <button class="chart-tab" data-tab="spatial">空间分析</button>
+                    <button class="chart-tab" data-tab="forecast">预测分析</button>
                 </div>
+            </div>
+
+            <div class="sidebar-section">
+                <h3>⚙️ 仪表盘配置</h3>
+                <button id="dashboardConfigBtn" class="btn btn-secondary btn-block">自定义仪表盘</button>
             </div>
         </aside>
 
@@ -236,12 +242,142 @@
                     </div>
                 </div>
             </div>
+
+            <div id="forecastTab" class="tab-content">
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h4>销售趋势预测</h4>
+                            <div class="chart-controls">
+                                <select id="forecastMetric">
+                                    <option value="sales_amount">销售额</option>
+                                    <option value="order_count">订单量</option>
+                                    <option value="customer_count">客户数</option>
+                                </select>
+                                <select id="forecastMethod">
+                                    <option value="linear">线性回归</option>
+                                    <option value="moving_average">移动平均</option>
+                                    <option value="exponential">指数平滑</option>
+                                </select>
+                                <select id="forecastPeriods">
+                                    <option value="7">预测7天</option>
+                                    <option value="14">预测14天</option>
+                                    <option value="30" selected>预测30天</option>
+                                    <option value="60">预测60天</option>
+                                    <option value="90">预测90天</option>
+                                </select>
+                                <select id="forecastFreq">
+                                    <option value="D">按日</option>
+                                    <option value="W">按周</option>
+                                    <option value="M">按月</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="forecastChart" class="chart-container"></div>
+                    </div>
+                </div>
+                <div class="chart-row">
+                    <div class="chart-card">
+                        <div class="chart-header">
+                            <h4>异常值检测</h4>
+                            <div class="chart-controls">
+                                <select id="anomalyMetric">
+                                    <option value="sales_amount">销售额</option>
+                                    <option value="order_count">订单量</option>
+                                    <option value="customer_count">客户数</option>
+                                </select>
+                                <select id="anomalyMethod">
+                                    <option value="z_score">3σ原则</option>
+                                    <option value="iqr">IQR方法</option>
+                                    <option value="time_series">时序异常</option>
+                                </select>
+                                <select id="anomalyThreshold">
+                                    <option value="2">2σ阈值</option>
+                                    <option value="3" selected>3σ阈值</option>
+                                    <option value="4">4σ阈值</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="anomalyChart" class="chart-container"></div>
+                    </div>
+                </div>
+                <div class="chart-row">
+                    <div class="chart-card info-card">
+                        <div class="chart-header">
+                            <h4>🔮 预测模型信息</h4>
+                        </div>
+                        <div id="forecastInfo" class="info-content">
+                            <p class="placeholder">加载数据后显示预测分析结果</p>
+                        </div>
+                    </div>
+                    <div class="chart-card info-card">
+                        <div class="chart-header">
+                            <h4>⚠️ 异常检测摘要</h4>
+                        </div>
+                        <div id="anomalyInfo" class="info-content">
+                            <p class="placeholder">加载数据后显示异常检测结果</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
     <div id="loadingOverlay" class="loading-overlay hidden">
         <div class="loading-spinner"></div>
         <p>加载中...</p>
+    </div>
+
+    <div id="dashboardConfigModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>⚙️ 仪表盘自定义配置</h3>
+                <button id="closeConfigModal" class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="config-section">
+                    <h4>显示的图表</h4>
+                    <div class="config-options">
+                        <label><input type="checkbox" class="dashboard-chart-toggle" data-chart="trend" checked> 趋势分析</label>
+                        <label><input type="checkbox" class="dashboard-chart-toggle" data-chart="comparison" checked> 对比分析</label>
+                        <label><input type="checkbox" class="dashboard-chart-toggle" data-chart="correlation" checked> 关联分析</label>
+                        <label><input type="checkbox" class="dashboard-chart-toggle" data-chart="spatial" checked> 空间分析</label>
+                        <label><input type="checkbox" class="dashboard-chart-toggle" data-chart="forecast" checked> 预测分析</label>
+                    </div>
+                </div>
+                <div class="config-section">
+                    <h4>主题风格</h4>
+                    <div class="config-options">
+                        <label><input type="radio" name="theme" value="default" checked> 默认紫色</label>
+                        <label><input type="radio" name="theme" value="blue"> 蓝色科技</label>
+                        <label><input type="radio" name="theme" value="green"> 清新绿色</label>
+                        <label><input type="radio" name="theme" value="dark"> 暗黑模式</label>
+                    </div>
+                </div>
+                <div class="config-section">
+                    <h4>图表配色</h4>
+                    <div class="config-options">
+                        <label><input type="radio" name="colorScheme" value="tableau" checked> Tableau 10</label>
+                        <label><input type="radio" name="colorScheme" value="category10"> Category 10</label>
+                        <label><input type="radio" name="colorScheme" value="viridis"> Viridis</label>
+                        <label><input type="radio" name="colorScheme" value="plasma"> Plasma</label>
+                    </div>
+                </div>
+                <div class="config-section">
+                    <h4>显示选项</h4>
+                    <div class="config-options">
+                        <label><input type="checkbox" id="configShowGrid" checked> 显示网格线</label>
+                        <label><input type="checkbox" id="configShowTooltip" checked> 显示提示框</label>
+                        <label><input type="checkbox" id="configAnimation"> 启用动画效果</label>
+                        <label><input type="checkbox" id="configAutoRefresh"> 自动刷新数据</label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="resetConfigBtn" class="btn btn-secondary">恢复默认</button>
+                <button id="saveConfigBtn" class="btn btn-primary">保存配置</button>
+            </div>
+        </div>
     </div>
 
     <div id="toast" class="toast hidden"></div>
@@ -252,6 +388,8 @@
     <script src="js/charts/scatterPlot.js"></script>
     <script src="js/charts/heatmap.js"></script>
     <script src="js/charts/mapChart.js"></script>
+    <script src="js/charts/forecastChart.js"></script>
+    <script src="js/charts/anomalyChart.js"></script>
     <script src="js/main.js"></script>
 </body>
 </html>

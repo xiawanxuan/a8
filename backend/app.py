@@ -12,6 +12,8 @@ from backend.modules.data_filter import DataFilter
 from backend.modules.data_aggregator import DataAggregator
 from backend.modules.trend_analyzer import TrendAnalyzer
 from backend.modules.correlation_analyzer import CorrelationAnalyzer
+from backend.modules.forecast_analyzer import ForecastAnalyzer
+from backend.modules.anomaly_detector import AnomalyDetector
 from backend.utils.helpers import safe_json_serialize
 
 app = Flask(__name__, 
@@ -25,6 +27,8 @@ data_filter = DataFilter(data_loader)
 data_aggregator = DataAggregator(data_loader)
 trend_analyzer = TrendAnalyzer(data_loader)
 correlation_analyzer = CorrelationAnalyzer(data_loader)
+forecast_analyzer = ForecastAnalyzer(data_loader)
+anomaly_detector = AnomalyDetector(data_loader)
 
 
 @app.route('/')
@@ -425,6 +429,79 @@ def spatial_distribution():
     if result is None:
         return jsonify({'success': False, 'message': '空间分布分析失败'}), 400
     
+    return jsonify({'success': True, 'data': result})
+
+
+@app.route('/api/analysis/forecast', methods=['POST'])
+def forecast_analysis():
+    data = request.json
+    time_column = data.get('time_column')
+    value_column = data.get('value_column')
+    method = data.get('method', 'linear')
+    periods = data.get('periods', 30)
+    window = data.get('window', 7)
+    alpha = data.get('alpha', 0.3)
+    freq = data.get('freq', 'D')
+    filters = data.get('filters', [])
+
+    if not time_column or not value_column:
+        return jsonify({'success': False, 'message': '缺少必要参数'}), 400
+
+    filtered_data = data_filter.filter(filters) if filters else None
+
+    result = forecast_analyzer.forecast(
+        time_column, value_column, method, periods, window, alpha, freq, filtered_data
+    )
+
+    if result is None:
+        return jsonify({'success': False, 'message': '预测分析失败'}), 400
+
+    return jsonify({'success': True, 'data': result})
+
+
+@app.route('/api/analysis/anomaly', methods=['POST'])
+def anomaly_detection():
+    data = request.json
+    value_column = data.get('value_column')
+    time_column = data.get('time_column')
+    method = data.get('method', 'z_score')
+    threshold = data.get('threshold', 3)
+    k = data.get('k', 1.5)
+    window = data.get('window', 7)
+    filters = data.get('filters', [])
+
+    if not value_column:
+        return jsonify({'success': False, 'message': '缺少必要参数'}), 400
+
+    filtered_data = data_filter.filter(filters) if filters else None
+
+    result = anomaly_detector.detect_anomalies(
+        value_column, method, time_column, threshold, k, window, filtered_data
+    )
+
+    if result is None:
+        return jsonify({'success': False, 'message': '异常检测失败'}), 400
+
+    return jsonify({'success': True, 'data': result})
+
+
+@app.route('/api/analysis/anomaly-summary', methods=['POST'])
+def anomaly_summary():
+    data = request.json
+    value_column = data.get('value_column')
+    time_column = data.get('time_column')
+    filters = data.get('filters', [])
+
+    if not value_column:
+        return jsonify({'success': False, 'message': '缺少必要参数'}), 400
+
+    filtered_data = data_filter.filter(filters) if filters else None
+
+    result = anomaly_detector.get_anomaly_summary(value_column, time_column, filtered_data)
+
+    if result is None:
+        return jsonify({'success': False, 'message': '异常检测摘要生成失败'}), 400
+
     return jsonify({'success': True, 'data': result})
 
 

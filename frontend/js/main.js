@@ -12,7 +12,7 @@ const MAX_SCATTER_POINTS = 500;
 const MAX_LINE_POINTS = 365;
 const UPDATE_DEBOUNCE_MS = 300;
 
-let lineChart, rollingChart, barChart, scatterChart, heatmapChart, corrMatrixChart, mapChart;
+let lineChart, rollingChart, barChart, scatterChart, heatmapChart, corrMatrixChart, mapChart, forecastChart, anomalyChart;
 
 document.addEventListener('DOMContentLoaded', function() {
     initCharts();
@@ -28,6 +28,8 @@ function initCharts() {
     heatmapChart = new HeatMap('heatmapChart');
     mapChart = new MapChart('mapChart');
     corrMatrixChart = new HeatMap('corrMatrix');
+    forecastChart = new ForecastChart('forecastChart', { color: '#667eea', forecastColor: '#52c41a' });
+    anomalyChart = new AnomalyChart('anomalyChart', { color: '#667eea', anomalyColor: '#f5222d' });
 }
 
 function initEventListeners() {
@@ -53,6 +55,22 @@ function initEventListeners() {
     document.getElementById('scatterColor').addEventListener('change', () => debouncedUpdate(updateScatterChart));
 
     document.getElementById('mapMetric').addEventListener('change', () => debouncedUpdate(updateMapChart));
+
+    document.getElementById('forecastMetric').addEventListener('change', () => debouncedUpdate(updateForecastChart));
+    document.getElementById('forecastMethod').addEventListener('change', () => debouncedUpdate(updateForecastChart));
+    document.getElementById('forecastPeriods').addEventListener('change', () => debouncedUpdate(updateForecastChart));
+    document.getElementById('forecastFreq').addEventListener('change', () => debouncedUpdate(updateForecastChart));
+
+    document.getElementById('anomalyMetric').addEventListener('change', () => debouncedUpdate(updateAnomalyChart));
+    document.getElementById('anomalyMethod').addEventListener('change', () => debouncedUpdate(updateAnomalyChart));
+    document.getElementById('anomalyThreshold').addEventListener('change', () => debouncedUpdate(updateAnomalyChart));
+
+    document.getElementById('dashboardConfigBtn').addEventListener('click', openDashboardConfig);
+    document.getElementById('closeConfigModal').addEventListener('click', closeDashboardConfig);
+    document.getElementById('saveConfigBtn').addEventListener('click', saveDashboardConfig);
+    document.getElementById('resetConfigBtn').addEventListener('click', resetDashboardConfig);
+
+    loadDashboardConfig();
 }
 
 function debouncedUpdate(updateFn) {
@@ -104,6 +122,9 @@ function switchTab(tabName) {
             corrMatrixChart.resize();
         } else if (tabName === 'spatial') {
             mapChart.resize();
+        } else if (tabName === 'forecast') {
+            forecastChart.resize();
+            anomalyChart.resize();
         }
     }, 50);
 }
@@ -378,7 +399,11 @@ async function updateAllCharts() {
             updateMapChart(),
             updateCorrelationMatrix(),
             updateTrendInfo(),
-            updateCorrelationInfo()
+            updateCorrelationInfo(),
+            updateForecastChart(),
+            updateAnomalyChart(),
+            updateForecastInfo(),
+            updateAnomalyInfo()
         ]);
     } finally {
         AppState.isUpdating = false;
@@ -630,4 +655,249 @@ function showToast(message, type = 'success') {
     toastTimer = setTimeout(() => {
         toast.classList.add('hidden');
     }, 3000);
+}
+
+async function updateForecastChart() {
+    if (!AppState.dataLoaded) return;
+
+    const metric = document.getElementById('forecastMetric').value;
+    const method = document.getElementById('forecastMethod').value;
+    const periods = parseInt(document.getElementById('forecastPeriods').value);
+    const freq = document.getElementById('forecastFreq').value;
+
+    const result = await API.getForecast('date', metric, method, periods, 7, 0.3, freq, AppState.filters);
+    if (result.success && result.data) {
+        forecastChart.setData(result.data, 'date', metric);
+    }
+}
+
+async function updateAnomalyChart() {
+    if (!AppState.dataLoaded) return;
+
+    const metric = document.getElementById('anomalyMetric').value;
+    const method = document.getElementById('anomalyMethod').value;
+    const threshold = parseFloat(document.getElementById('anomalyThreshold').value);
+
+    let anomalyResult;
+    if (method === 'z_score' || method === 'iqr') {
+        anomalyResult = await API.getAnomalyDetection(metric, method, null, threshold, 1.5, 7, AppState.filters);
+    } else {
+        anomalyResult = await API.getAnomalyDetection(metric, 'time_series', 'date', threshold, 1.5, 7, AppState.filters);
+    }
+
+    if (anomalyResult.success && anomalyResult.data) {
+        const lineResult = await API.getLineChartData('date', metric, 'D', 'sum', AppState.filters);
+        if (lineResult.success && lineResult.data) {
+            const anomalies = anomalyResult.data.anomalies || [];
+            anomalyChart.setTimeSeriesData(lineResult.data, anomalies, 'date', metric);
+        }
+    }
+}
+
+async function updateForecastInfo() {
+    if (!AppState.dataLoaded) return;
+
+    const metric = document.getElementById('forecastMetric').value;
+    const method = document.getElementById('forecastMethod').value;
+    const periods = parseInt(document.getElementById('forecastPeriods').value);
+    const freq = document.getElementById('forecastFreq').value;
+
+    const result = await API.getForecast('date', metric, method, periods, 7, 0.3, freq, AppState.filters);
+
+    if (result.success && result.data && result.data.model) {
+        const model = result.data.model;
+        const methodNames = {
+            'linear_regression': '线性回归',
+            'moving_average': '移动平均',
+            'exponential_smoothing': '指数平滑'
+        };
+
+        let html = '<div class="info-grid">';
+        html += `<div class="info-item"><div class="label">预测方法</div><div class="value">${methodNames[model.method] || model.method}</div></div>`;
+        html += `<div class="info-item"><div class="label">预测周期</div><div class="value">${model.periods}天</div></div>`;
+
+        if (model.r_squared !== undefined) {
+            html += `<div class="info-item"><div class="label">R² 拟合度</div><div class="value">${(model.r_squared * 100).toFixed(1)}%</div></div>`;
+        }
+        if (model.rmse !== undefined) {
+            html += `<div class="info-item"><div class="label">RMSE</div><div class="value">${formatNumber(model.rmse)}</div></div>`;
+        }
+        if (model.last_value !== undefined) {
+            html += `<div class="info-item"><div class="label">预测值</div><div class="value positive">${formatNumber(model.last_value)}</div></div>`;
+        }
+        if (model.std !== undefined) {
+            html += `<div class="info-item"><div class="label">标准差</div><div class="value">${formatNumber(model.std)}</div></div>`;
+        }
+        html += '</div>';
+
+        document.getElementById('forecastInfo').innerHTML = html;
+    }
+}
+
+async function updateAnomalyInfo() {
+    if (!AppState.dataLoaded) return;
+
+    const metric = document.getElementById('anomalyMetric').value;
+
+    const result = await API.getAnomalySummary(metric, 'date', AppState.filters);
+
+    if (result.success && result.data) {
+        const data = result.data;
+
+        let html = '<div class="info-grid">';
+        html += `<div class="info-item"><div class="label">Z-Score 异常数</div><div class="value ${data.z_score.anomaly_count > 0 ? 'negative' : ''}">${data.z_score.anomaly_count}个</div></div>`;
+        html += `<div class="info-item"><div class="label">IQR 异常数</div><div class="value ${data.iqr.anomaly_count > 0 ? 'negative' : ''}">${data.iqr.anomaly_count}个</div></div>`;
+        html += `<div class="info-item"><div class="label">数据均值</div><div class="value">${formatNumber(data.z_score.mean)}</div></div>`;
+        html += `<div class="info-item"><div class="label">数据标准差</div><div class="value">${formatNumber(data.z_score.std)}</div></div>`;
+        html += '</div>';
+
+        html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #eee;">';
+        html += `<p style="font-size:12px;color:#666;margin-bottom:4px;">IQR 下界: ${formatNumber(data.iqr.lower_bound)}</p>`;
+        html += `<p style="font-size:12px;color:#666;">IQR 上界: ${formatNumber(data.iqr.upper_bound)}</p>`;
+        html += '</div>';
+
+        document.getElementById('anomalyInfo').innerHTML = html;
+    }
+}
+
+const DashboardConfig = {
+    charts: {
+        trend: true,
+        comparison: true,
+        correlation: true,
+        spatial: true,
+        forecast: true
+    },
+    theme: 'default',
+    colorScheme: 'tableau',
+    showGrid: true,
+    showTooltip: true,
+    animation: false,
+    autoRefresh: false
+};
+
+function loadDashboardConfig() {
+    try {
+        const saved = localStorage.getItem('dashboardConfig');
+        if (saved) {
+            const config = JSON.parse(saved);
+            Object.assign(DashboardConfig, config);
+            applyDashboardConfig();
+        }
+    } catch (e) {
+        console.log('加载配置失败，使用默认配置');
+    }
+}
+
+function applyDashboardConfig() {
+    document.querySelectorAll('.chart-tab').forEach(tab => {
+        const chartType = tab.dataset.tab;
+        if (DashboardConfig.charts[chartType] === false) {
+            tab.style.display = 'none';
+        } else {
+            tab.style.display = '';
+        }
+    });
+
+    document.querySelectorAll('.tab-content').forEach(content => {
+        const id = content.id;
+        const chartType = id.replace('Tab', '');
+        if (DashboardConfig.charts[chartType] === false) {
+            content.classList.remove('active');
+        }
+    });
+
+    document.body.classList.remove('theme-blue', 'theme-green', 'theme-dark');
+    if (DashboardConfig.theme !== 'default') {
+        document.body.classList.add(`theme-${DashboardConfig.theme}`);
+    }
+
+    if (DashboardConfig.showGrid) {
+        document.body.classList.remove('hide-grid');
+    } else {
+        document.body.classList.add('hide-grid');
+    }
+}
+
+function openDashboardConfig() {
+    const modal = document.getElementById('dashboardConfigModal');
+    if (modal) modal.classList.remove('hidden');
+
+    document.querySelectorAll('.dashboard-chart-toggle').forEach(checkbox => {
+        const chart = checkbox.dataset.chart;
+        checkbox.checked = DashboardConfig.charts[chart] !== false;
+    });
+
+    document.querySelectorAll('input[name="theme"]').forEach(radio => {
+        radio.checked = radio.value === DashboardConfig.theme;
+    });
+
+    document.querySelectorAll('input[name="colorScheme"]').forEach(radio => {
+        radio.checked = radio.value === DashboardConfig.colorScheme;
+    });
+
+    document.getElementById('configShowGrid').checked = DashboardConfig.showGrid;
+    document.getElementById('configShowTooltip').checked = DashboardConfig.showTooltip;
+    document.getElementById('configAnimation').checked = DashboardConfig.animation;
+    document.getElementById('configAutoRefresh').checked = DashboardConfig.autoRefresh;
+}
+
+function closeDashboardConfig() {
+    const modal = document.getElementById('dashboardConfigModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function saveDashboardConfig() {
+    document.querySelectorAll('.dashboard-chart-toggle').forEach(checkbox => {
+        const chart = checkbox.dataset.chart;
+        DashboardConfig.charts[chart] = checkbox.checked;
+    });
+
+    const themeRadio = document.querySelector('input[name="theme"]:checked');
+    if (themeRadio) DashboardConfig.theme = themeRadio.value;
+
+    const colorRadio = document.querySelector('input[name="colorScheme"]:checked');
+    if (colorRadio) DashboardConfig.colorScheme = colorRadio.value;
+
+    DashboardConfig.showGrid = document.getElementById('configShowGrid').checked;
+    DashboardConfig.showTooltip = document.getElementById('configShowTooltip').checked;
+    DashboardConfig.animation = document.getElementById('configAnimation').checked;
+    DashboardConfig.autoRefresh = document.getElementById('configAutoRefresh').checked;
+
+    try {
+        localStorage.setItem('dashboardConfig', JSON.stringify(DashboardConfig));
+    } catch (e) {
+        console.log('保存配置失败');
+    }
+
+    applyDashboardConfig();
+    closeDashboardConfig();
+    showToast('仪表盘配置已保存', 'success');
+
+    const activeTab = document.querySelector('.chart-tab.active');
+    if (activeTab && DashboardConfig.charts[activeTab.dataset.tab] === false) {
+        const firstVisible = document.querySelector('.chart-tab:not([style*="display: none"])');
+        if (firstVisible) {
+            switchTab(firstVisible.dataset.tab);
+        }
+    }
+}
+
+function resetDashboardConfig() {
+    DashboardConfig.charts = {
+        trend: true,
+        comparison: true,
+        correlation: true,
+        spatial: true,
+        forecast: true
+    };
+    DashboardConfig.theme = 'default';
+    DashboardConfig.colorScheme = 'tableau';
+    DashboardConfig.showGrid = true;
+    DashboardConfig.showTooltip = true;
+    DashboardConfig.animation = false;
+    DashboardConfig.autoRefresh = false;
+
+    openDashboardConfig();
+    showToast('已恢复默认配置', 'info');
 }
